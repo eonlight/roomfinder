@@ -53,6 +53,7 @@ docs/_build/
 # PyBuilder
 target/
 
-# settings stuffs
+# settings and stuffs
 settings.py
 *.json
+*.html

@@ -198,7 +198,7 @@ class Zoopla(SearchEngine):
                     url = '%s/%s/%s/?%s' % (self.location, self.search_endpoint, self.preferences['q'].replace('+', '-'), get_params)
                     soup = BeautifulSoup(requests.get(url).text)
 
-                if re.search('of \d+', soup('div', {'class': 'result-count'})[0].text):
+                if soup('div', {'class': 'result-count'}) and re.search('of \d+', soup('div', {'class': 'result-count'})[0].text):
                     try:
                         results = int(re.search('of \d+', soup('div', {'class': 'result-count'})[0].text).group().replace('of ', ''))
                     except:
