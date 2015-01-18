@@ -545,7 +545,7 @@ def main():
     }
     spareroom = SpareRoom(spareroom_preferences, settings.AREAS, settings.SPAREROOM_COOKIES)
     spareroom.get_new_rooms()
-    spareroom.generate_report(fields=settings.FIELDS, pref_ids=FIELDS.SPAREROOM_PREF_IDS)
+    spareroom.generate_report(fields=settings.FIELDS, pref_ids=settings.SPAREROOM_PREF_IDS)
 
     gumtree_preferences = {
         'when': settings.WHEN,
@@ -555,7 +555,7 @@ def main():
     }
     gumtree = Gumtree(gumtree_preferences, settings.AREAS)
     gumtree.get_new_rooms()
-    gumtree.generate_report(fields=settings.FIELDS, pref_ids=FIELDS.GUMTREE_PREF_IDS)
+    gumtree.generate_report(fields=settings.FIELDS, pref_ids=settings.GUMTREE_PREF_IDS)
 
     zoopla_preferences = {
         'when': settings.WHEN,
@@ -565,7 +565,7 @@ def main():
     }
     zoopla = Zoopla(zoopla_preferences, settings.AREAS)
     zoopla.get_new_rooms()
-    zoopla.generate_report(fields=settings.FIELDS, pref_ids=FIELDS.ZOOPLA_PREF_IDS)
+    zoopla.generate_report(fields=settings.FIELDS, pref_ids=settings.ZOOPLA_PREF_IDS)
 
 if __name__ == "__main__":
     main()
