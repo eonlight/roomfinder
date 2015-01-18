@@ -18,7 +18,7 @@ class SearchEngine(object):
             for key in preferences:
                 self.preferences[key] = preferences[key]
         self.rooms = {}
-        self.load_rooms(False)
+        self.load_rooms(settings.MARK_OLD)
 
     def load_rooms(self, clean=True):
         try:
@@ -439,13 +439,13 @@ class SpareRoom(SearchEngine):
 
 
             # continue if already info of room and no phone or phone and was not free
-            if flat_id in self.rooms and (not self.rooms[flat_id]['phone'] or (self.rooms[flat_id]['phone'] and self.rooms[flat_id]['free'])):
+            if flat_id in self.rooms: #and (not self.rooms[flat_id]['phone'] or (self.rooms[flat_id]['phone'] and self.rooms[flat_id]['free'])):
                 continue
 
             new_rooms = True
 
             try:
-                self.get_room_info(flat_id, search)
+                #self.get_room_info(flat_id, search)
                 self.rate_room(flat_id)
             except:
                 continue

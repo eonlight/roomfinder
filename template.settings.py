@@ -15,5 +15,6 @@ SPAREROOM_PREF_IDS = ['1234567', '1234566', '0000000']
 GUMTREE_PREF_IDS = ['1234567', '1234566', '0000000']
 ZOOPLA_PREF_IDS = ['1234567', '1234566', '0000000']
 
-
 FIELDS = ['score', 'id', 'images', 'prices', 'search', 'available', 'phone']
+
+MARK_OLD = False # True: mark rooms already fetched as old and doesn't show on report
