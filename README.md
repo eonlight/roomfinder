@@ -3,20 +3,30 @@
 ### Short Description
 Finds and Scores rooms on Spareroom, Gumtree and Zoopla
 
-### How to
+### How to:
 
+#### Install
 * git clone https://github.com/eonlight/roomfinder.git
 
+#### Configure
 * cp template.settings.py settings.py
-
 * edit at least:
-
     * MAX\_RENT\_PM
     * MAX\_RENT\_PW
     * AREAS
     * FOR
 
-* python rooms.py
+#### Run
+* Normal (Fetches new results)
+    * python rooms.py
+* Rate (Re-rates the fetched rooms and marks them as new)
+    * python rooms.py --rate
+* Optional Parameter (number of rooms to be included on the report)
+    * python rooms.py --max-range 100
+* Also added the options to remove search engines from the script:
+    * --no-spareroom
+    * --no-gumtree
+    * --no-zoopla
 
 ### Reports
 
@@ -28,4 +38,4 @@ It generates 3 HTML files with the fetched rooms for each website.
 
 Nothing to do right now, if you have sugestions, please feel free to ask.
 
-Edit and do whatever you want with the code, it helped me find a place to live.
+Edit and do whatever you want with the code, it helped me find a place to live, maybe it will also help you.

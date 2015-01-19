@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from datetime import datetime
 from bs4 import BeautifulSoup
+from sys import argv
 import settings
 import requests
 import json
@@ -47,6 +48,7 @@ class SearchEngine(object):
     def rate(self):
         for room in self.rooms:
             try:
+                self.rooms[room]['new'] = True
                 self.rate_room(room)
             except Exception, e:
                 print e
@@ -105,7 +107,7 @@ class SearchEngine(object):
         html += '<tbody></table><script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js"></script></body></html>'
 
         with open(self.file_name.replace('.json', '.html'), 'w') as f:
-            f.write(html)
+            f.write(html.encode('utf-8'))
 
     def rate_room(self, key=None):
         if not key or key not in self.rooms:
@@ -154,6 +156,7 @@ class SearchEngine(object):
         difference = (self.preferences['when'] - available_time).total_seconds()
         score += 100 if difference > 0 else 80 if difference > -2880 else 50 if difference > -7200 else 0
         if (settings.MIN_AVAILABLE_TIME - available_time).total_seconds() > 0:
+            self.rooms[key]['new'] = False
             score = 0
 
         self.rooms[key]['score'] = score
@@ -537,35 +540,62 @@ class SpareRoom(SearchEngine):
         }
 
 def main():
-    spareroom_preferences = {
-        'when': settings.WHEN,
-        'max_rent': settings.MAX_RENT_PM,
-        'rooms_for': settings.FOR,
-        'room_types': settings.TYPE,
-    }
-    spareroom = SpareRoom(spareroom_preferences, settings.AREAS, settings.SPAREROOM_COOKIES)
-    spareroom.get_new_rooms()
-    spareroom.generate_report(fields=settings.FIELDS, pref_ids=settings.SPAREROOM_PREF_IDS)
 
-    gumtree_preferences = {
-        'when': settings.WHEN,
-        'max_rent': settings.MAX_RENT_PM,
-        'max_price': settings.MAX_RENT_PW,
-        'max_range': 10
-    }
-    gumtree = Gumtree(gumtree_preferences, settings.AREAS)
-    gumtree.get_new_rooms()
-    gumtree.generate_report(fields=settings.FIELDS, pref_ids=settings.GUMTREE_PREF_IDS)
+    max_range = -1
+    if '--max-range' in argv:
+        try:
+            max_range = int(argv[argv.index('--max-range') + 1])
+        except (ValueError, IndexError):
+            print 'Error: o max range given...'; exit(0)
 
-    zoopla_preferences = {
-        'when': settings.WHEN,
-        'max_range': 5,
-        'price_max': settings.MAX_RENT_PM,
-        'max_rent': settings.MAX_RENT_PM,
-    }
-    zoopla = Zoopla(zoopla_preferences, settings.AREAS)
-    zoopla.get_new_rooms()
-    zoopla.generate_report(fields=settings.FIELDS, pref_ids=settings.ZOOPLA_PREF_IDS)
+    if not '--no-spareroom' in argv:
+        spareroom_preferences = {
+            'when': settings.WHEN,
+            'max_rent': settings.MAX_RENT_PM,
+            'rooms_for': settings.FOR,
+            'room_types': settings.TYPE,
+        }
+        spareroom = SpareRoom(spareroom_preferences, settings.AREAS, settings.SPAREROOM_COOKIES)
+
+    if not '--no-gumtree' in argv:
+        gumtree_preferences = {
+            'when': settings.WHEN,
+            'max_rent': settings.MAX_RENT_PM,
+            'max_price': settings.MAX_RENT_PW,
+            'max_range': 10
+        }
+        gumtree = Gumtree(gumtree_preferences, settings.AREAS)
+
+    if not '--no-zoopla' in argv:
+        zoopla_preferences = {
+            'when': settings.WHEN,
+            'max_range': 5,
+            'price_max': settings.MAX_RENT_PM,
+            'max_rent': settings.MAX_RENT_PM,
+        }
+        zoopla = Zoopla(zoopla_preferences, settings.AREAS)
+
+    if '--rate' in argv:
+        if not '--no-spareroom' in argv:
+            spareroom.rate()
+        if not '--no-gumtree' in argv:
+            gumtree.rate()
+        if not '--no-zoopla' in argv:
+            zoopla.rate()
+    else:
+        if not '--no-spareroom' in argv:
+            spareroom.get_new_rooms()
+        if not '--no-gumtree' in argv:
+            gumtree.get_new_rooms()
+        if not '--no-zoopla' in argv:
+            zoopla.get_new_rooms()
+
+    if not '--no-spareroom' in argv:
+        spareroom.generate_report(fields=settings.FIELDS, pref_ids=settings.SPAREROOM_PREF_IDS, max_range=max_range)
+    if not '--no-gumtree' in argv:
+        gumtree.generate_report(fields=settings.FIELDS, pref_ids=settings.GUMTREE_PREF_IDS, max_range=max_range)
+    if not '--no-zoopla' in argv:
+        zoopla.generate_report(fields=settings.FIELDS, pref_ids=settings.ZOOPLA_PREF_IDS, max_range=max_range)
 
 if __name__ == "__main__":
     main()
