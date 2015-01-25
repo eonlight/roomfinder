@@ -23,7 +23,10 @@ Finds and Scores rooms on Spareroom, Gumtree and Zoopla
     * python rooms.py --rate
 * Optional Parameter (number of rooms to be included on the report)
     * python rooms.py --max-range 100
-* Also added the options to remove search engines from the script:
+* Other Options (only on spare room for now)
+    * --force or -f (forces fetch information of already fetched room)
+    * --verbose or -v
+* Also added the options to remove search engines from the script
     * --no-spareroom
     * --no-gumtree
     * --no-zoopla

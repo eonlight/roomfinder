@@ -50,8 +50,7 @@ class SearchEngine(object):
             try:
                 self.rooms[room]['new'] = True
                 self.rate_room(room)
-            except Exception, e:
-                print e
+            except:
                 continue
         self.save_rooms()
 
@@ -65,7 +64,7 @@ class SearchEngine(object):
         self.save_rooms()
 
     def generate_report(self, fields=None, pref_ids=[], max_range=-1, when=False):
-        name = str(self.__class__).split("'")[1].replace('rooms.', '').replace('main.', '')
+        name = str(self.__class__.__name__).split(' ')[0]
         html = '<html><head><title>%s Classified Ads</title><link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css"></head><body>' % name
         html += '<table class="table">'
         html += '<thead><tr>'
@@ -118,7 +117,7 @@ class SearchEngine(object):
 
         areas = [area.lower() for area in self.AREAS]
         # check station, give better score if first stations
-        score += (len(areas) - areas.index(room['station'].lower()))*10 if room['station'].lower() in areas else 0
+        score += (len(areas) - areas.index(room['station'].lower()))*50 if room['station'].lower() in areas else 0
 
         # lower price -> better score
         price = min(room['prices'])
@@ -131,7 +130,7 @@ class SearchEngine(object):
         score += 20 if deposit != -1 and deposit <= price else 0
 
         # bills includes - better score
-        score += 50 if room['bills'] else 0
+        score += 100 if room['bills'] else 0
 
         # less housemates - better score
         if room['housemates'] != -1:
@@ -139,13 +138,10 @@ class SearchEngine(object):
 
         # more images - better score
         # no images -> -100
-        score += 5*len(room['images']) if len(room['images']) > 0 else - 100
+        score += 7*len(room['images']) if len(room['images']) > 0 else - 100
 
         # if phone - better score
-        score += 50 if room['phone'] else 0
-
-        # if free - better score
-        score += 100 if room['free'] else 0
+        score += 100 if room['phone'] else 0
 
         # the closer (or now) the room is available to desired - better score
         try:
@@ -263,7 +259,6 @@ class Zoopla(SearchEngine):
             'rooms': -1,
             'housemates': -1,
             'phone': phone,
-            'free': True,
             'new': True,
         }
 
@@ -358,172 +353,129 @@ class Gumtree(SearchEngine):
             'rooms': -1,
             'housemates': -1,
             'phone': phone,
-            'free': True,
             'new': True,
         }
 
 
 class SpareRoom(SearchEngine):
+    # http://iphoneapp.spareroom.co.uk/flatshares/3140871?api_key=502&api_sig=7f2fd77f90f013577d693ee202f61c8e&format=json
+    # http://iphoneapp.spareroom.co.uk/flatshares?api_key=502&api_sig=170380c09d6aa765d561e678ec3f390f&format=json&max_per_page=10&max_rent=950&min_rent=403&page=1&per=pcm&room_types=double&rooms_for=males&where=paddington
+    headers = {'User-Agent': 'SpareRoomUK 3.1'}
+
+    api_location = 'http://iphoneapp.spareroom.co.uk'
+    api_search_endpoint = 'flatshares'
+    api_details_endpoint = 'flatshares'
 
     location = 'http://www.spareroom.co.uk'
-    search_endpoint = 'flatshare/search.pl'
     details_endpoint = 'flatshare/flatshare_detail.pl?flatshare_id='
-    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:32.0) Gecko/20100101 Firefox/32.0'}
-
     file_name = 'spareroom.json'
 
     preferences = {
-        'flatshare_type': 'offered',
-        'location_type': 'area',
-        'showme_rooms': 'Y',
-        'showme_1beds': 'Y',
+        'format': 'json',
         'max_rent': settings.MAX_RENT_PM,
         'per': 'pcm',
-        'rooms_for': settings.FOR,
+        'page': 1,
         'room_types': settings.TYPE,
-        'days_of_wk_available': '7+days+a+week',
-        'action': 'search',
-        'search': ''
+        'rooms_for': settings.FOR,
+        'max_per_page': settings.MAX_RESULTS,
+        'where': 'paddington'
     }
 
     def get_new_rooms(self):
         for area in self.AREAS:
-            print 'Searching for %s flats in SpareRoom' % area
-
-            # first request
-            self.preferences['search'] = area.replace(' ', '+')
-            get_params = '&'.join(['%s=%s' % (key, self.preferences[key]) if key != 'when' and key != 'max_range' else '' for key in self.preferences]).replace('&&', '&')
-            url = '%s/%s?%s' % (self.location, self.search_endpoint, get_params)
-
-            try:
-                # Create BS object
-                soup = BeautifulSoup(requests.get(url).text)
-
-                # get search id for next pages
-                search_id = int(re.search('\d+', soup('link', {'rel': 'canonical'})[0].attrs['href']).group())
-                # starting offest for next pages
-                offset = 10
-
-                # get the number of results
-                results_no = int(re.search(' \d+ ', soup('p', {'class': 'navcurrent'})[0].text).group().strip())
-            except:
-                print 'Something went wrong getting search for %s' % area
-                continue
-
-            print 'Parsing 10 / %s' % results_no
-            new_rooms = self.get_flats_info(soup, area)
-
-            # get the rest of the pages - forget id new rooms for now <---------
-            #while offset < results_no and new_rooms:
-            while offset < results_no:
-                # make request for next batch of rooms
-                next_url = '%s/flatshare/?search_id=%ssort_by=age&mode=list&offset=%s' % (self.location, search_id, offset)
-                soup = BeautifulSoup(requests.get(next_url).text)
-
-                print 'Parsing %s / %s' % (offset+10, results_no)
-                new_rooms = self.get_flats_info(soup, area)
-
-                offset += 10
+            self.search_rooms_in(area)
             self.save_rooms()
 
-    def get_flats_info(self, soup, search=None):
-        new_rooms = False
-        for li in soup('li', {'class': 'listing_result'}):
+    def search_rooms_in(self, area):
+        if settings.VERBOSE:
+            print 'Searching for %s flats in SpareRoom' % area
 
-            # continue if it is not a flat
-            if 'flatshare_id' not in li.attrs['data-href']:
-                continue
-
-            # get information need sorted out
-            try:
-                flat_id = str(int(li.attrs['data-href'].split('flatshare_id=')[1].split('&')[0]))
-            except:
-                continue
-
-
-            # continue if already info of room and no phone or phone and was not free
-            if flat_id in self.rooms: #and (not self.rooms[flat_id]['phone'] or (self.rooms[flat_id]['phone'] and self.rooms[flat_id]['free'])):
-                continue
-
-            new_rooms = True
-
-            try:
-                #self.get_room_info(flat_id, search)
-                self.rate_room(flat_id)
-            except:
-                continue
-
-        return new_rooms
-
-    def get_room_info(self, flat_id, search):
-        print 'Getting %s flat details' % flat_id
-        url = '%s/%s%s' % (self.location, self.details_endpoint, flat_id)
-        s = BeautifulSoup(requests.get(url, cookies=self.cookies, headers=self.headers).text)
-        if len(s('span', {'class': 'listing_mon_fri'})) > 0:
-            print 'Mon-Fri - Removing...'
-            return
-
-        details_bs = s('div', {'class': 'detail_page_tab_content_inner'})[0]('div', {'class': 'col'})[1]
-
-        # get information to save
-        images = ['http:%s' % img.attrs['src'] for img in s('div', {'class': 'col2'})[0]('img')]
-        try:
-            station = re.search('.*\sStation', details_bs('ul')[0].text).group().replace('\t', '').replace('Station', '').strip()
-        except:
-            station = 'parsing error'
+        self.preferences['page'] = 1
+        self.preferences['where'] = area.lower()
+        params = '&'.join(['%s=%s' % (key, self.preferences[key]) for key in self.preferences])
+        url = '%s/%s?%s' % (self.api_location, self.api_search_endpoint, params)
 
         try:
-            free = False
-            if 'Free to contact' in s('div', 'block_contact')[0]('h3')[0].text:
-                free = True
-        except:
-            free = False
+            results = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
+            if settings.VERBOSE:
+                print 'Parsing page %s/%s flats in %s' % (results['page'], results['pages'], area)
 
-        prices = []
+            for room in results['results']:
+                room_id = room['advert_id']
+
+                if room_id in self.rooms and not settings.FORCE:
+                    continue
+
+                self.get_room_info(room_id, area)
+                self.rate_room(room_id)
+        except:
+            return None
+
+        for page in range(1, int(results['pages'])):
+            self.preferences['page'] = page + 1
+            params = '&'.join(['%s=%s' % (key, self.preferences[key]) for key in self.preferences])
+            url = '%s/%s?%s' % (self.api_location, self.api_search_endpoint, params)
+            results = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
+            if settings.VERBOSE:
+                print 'Parsing page %s/%s flats in %s' % (results['page'], results['pages'], area)
+
+            for room in results['results']:
+                room_id = room['advert_id']
+
+                if room_id in self.rooms and not settings.FORCE:
+                    continue
+
+                self.get_room_info(room_id, area)
+                self.rate_room(room_id)
+
+    def get_room_info(self, room_id, search):
+        if settings.VERBOSE:
+            print 'Getting %s flat details' % room_id
+
+        url = '%s/%s/%s?format=json' % (self.api_location, self.api_details_endpoint, room_id)
         try:
-            for r in details_bs('ul')[1]('li'):
-                try:
-                    prices.append(int(re.search('\d+', r.text).group()) if 'pcm' in r.text else int(re.search('\d+', r.text).group())*52/12)
-                except:
-                    prices.append(-1)
+            room = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
         except:
-            return
+            return None
 
-        available = details_bs('td')[0].text.replace('\n', '').replace('\t','')
-        available_timestamp = datetime.now() if 'Now' in available else datetime.strptime(available, "%d %b %Y")
+        if 'days_of_wk_available' in room['advert_summary'] and room['advert_summary']['days_of_wk_available'] != '7 days a week':
+            if settings.VERBOSE:
+                print 'Room availability: %s -> Removing' % room['advert_summary']['days_of_wk_available']
+            return None
 
-        deposits = []
-        bills = False
-        housemates = rooms_no = 0
-        for t in details_bs('table'):
-            if 'Current Household' in t.text:
-                try:
-                    housemates = int(re.search('\d+', t('td')[0].text).group())
-                except:
-                    housemates = -1
-                try:
-                    rooms_no = int(re.search('\d+', t('td')[1].text).group())
-                except:
-                    rooms_no = -1
-            elif 'Extra costs' in t.text:
-                for i in range(len(prices)):
-                    try:
-                        deposits.append(int(re.search('\d+', t('td')[i].text).group()))
-                    except:
-                        deposits.append(-1)
-                bills = True if len(t('td')) > len(prices) and 'Yes' in t('td')[len(prices)].text else False
+        phone = room['advert_summary']['tel'] if 'tel' in room['advert_summary'] else room['advert_summary']['tel_formatted'] if 'tel_formatted' in room['advert_summary'] else False
+        bills = True if 'bills_inc' in room['advert_summary'] and room['advert_summary']['bills_inc'] == 'Yes' else False
+        station = room['advert_summary']['nearest_station']['station_name'] if 'nearest_station' in room['advert_summary'] else search
+        images = [img['large_url'] for img in room['advert_summary']['photos']] if 'photos' in room['advert_summary'] else []
+        available = room['advert_summary']['available'] if 'available' in room['advert_summary'] else 'Now'
 
-        phone = True if len(s('li', {'class': 'phoneadvertiser'})) > 0 else False
-        if phone:
-            phone_text = 'Phone (Free)' if free else 'Phone (Paid)'
-            phone = '<a href="%s/%s%s&mode=contact&submode=bytel">%s</a>' % (self.location, self.details_endpoint, flat_id, phone_text)
+        try:
+            available_timestamp = datetime.now() if available == 'Now' else datetime.strptime(available, "%d %b %Y")
+        except:
+            available_timestamp = datetime.now()
+
+        rooms_no = room['advert_summary']['rooms_in_property'] if 'rooms_in_property' in room['advert_summary'] else -1
+        housemates = room['advert_summary']['occupants'] if 'occupants' in room['advert_summary'] else -1
+
+        #if 'rooms' not in room['advert_summary']:
+            #return None
+
+        prices = deposits = []
+        if 'rooms' in room['advert_summary']:
+            for r in room['advert_summary']['rooms']:
+                if 'security_deposit' in r and r['security_deposit']:
+                    deposits.append(int(r['security_deposit'].split('.', 1)[0]))
+                if 'room_price' in r and r['room_price']:
+                    price = int(r['room_price'].split('.', 1)[0])
+                    price = price if r['room_per'] == 'pcm' else price * 52 / 12
+                    prices.append(price)
+        else:
+            prices.append(room['advert_summary']['min_rent'] if 'min_rent' in room['advert_summary'] else room['advert_summary']['max_rent'] if 'max_rent' in room['advert_summary'] else None)
 
         new = True
-        if s('p', {'class': 'msg notice'}):
-            new = False
 
-        self.rooms[flat_id] = {
-            'id': flat_id,
+        self.rooms[room_id] = {
+            'id': room_id,
             'search': search,
             'images': images,
             'station': station,
@@ -535,7 +487,6 @@ class SpareRoom(SearchEngine):
             'rooms': rooms_no,
             'housemates': housemates,
             'phone': phone,
-            'free': free,
             'new': new,
         }
 
@@ -548,12 +499,19 @@ def main():
         except (ValueError, IndexError):
             print 'Error: o max range given...'; exit(0)
 
+    if '-v' in argv or '--verbose' in argv:
+        settings.VERBOSE = True
+
+    if '-f' in argv or '--force' in argv:
+        settings.FORCE = True
+
     if not '--no-spareroom' in argv:
         spareroom_preferences = {
             'when': settings.WHEN,
             'max_rent': settings.MAX_RENT_PM,
             'rooms_for': settings.FOR,
             'room_types': settings.TYPE,
+            'max_per_page': settings.MAX_RESULTS
         }
         spareroom = SpareRoom(spareroom_preferences, settings.AREAS, settings.SPAREROOM_COOKIES)
 
