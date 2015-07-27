@@ -181,7 +181,7 @@ class SearchEngine(object):
         score = area_score * 0.25
 
         if settings.DEBUG:
-            print "AREA SCORE: {score}".format(score=area_score)
+            print("AREA SCORE: {score}".format(score=area_score))
 
         # lower price -> better score
         price = min(room['prices'])
@@ -190,7 +190,7 @@ class SearchEngine(object):
         price_score = max(0, 50 - (difference)/10) if price >= MAX_RENT_PM else min(100, 50 + (difference)/10)
 
         if settings.DEBUG:
-            print "PRICE SCORE: {score}".format(score=price_score)
+            print("PRICE SCORE: {score}".format(score=price_score))
 
         score += price_score*0.05
 
@@ -202,7 +202,7 @@ class SearchEngine(object):
         #score += 20 if deposit != -1 and deposit <= price else 0
 
         if settings.DEBUG:
-            print "DEPOSIT SCORE: {score}".format(score=deposit_score)
+            print("DEPOSIT SCORE: {score}".format(score=deposit_score))
 
         score += deposit_score*0.05
 
@@ -212,7 +212,7 @@ class SearchEngine(object):
         rooms_score = max(0, 100 - (int(room['rooms']) - 1)*15)
 
         if settings.DEBUG:
-            print "ROOMS SCORE: {score}".format(score=rooms_score)
+            print("ROOMS SCORE: {score}".format(score=rooms_score))
 
         score += rooms_score*0.20
 
@@ -223,7 +223,7 @@ class SearchEngine(object):
             #score += 50 if room['housemates'] < 0 else 40 if room['housemates'] < 2 else 30 if room['housemates'] < 4 else 0
 
             if settings.DEBUG:
-                print "HOUSEMATES SCORE: {score}".format(score=housemates_score)
+                print("HOUSEMATES SCORE: {score}".format(score=housemates_score))
 
             score += housemates_score*0.20
 
@@ -233,7 +233,7 @@ class SearchEngine(object):
         image_score = min(100, 25*len(room['images']))
 
         if settings.DEBUG:
-            print "IMAGE SCORE: {score}".format(score=image_score)
+            print("IMAGE SCORE: {score}".format(score=imntage_score))
 
         score += image_score*0.05
 
@@ -251,12 +251,12 @@ class SearchEngine(object):
         available_score = max(0, 100 - (difference/60/60/24))
 
         if settings.DEBUG:
-            print "AVAILABLE SCORE: {score}".format(score=available_score)
+            print("AVAILABLE SCORE: {score}".format(score=available_score))
 
         score += image_score*0.15
 
         if settings.DEBUG:
-            print "FINAL SCORE: {score}".format(score=score)
+            print("FINAL SCORE: {score}".format(score=score))
 
         if (settings.MIN_AVAILABLE_TIME - available_time).total_seconds() > 0:
             self.rooms[key]['new'] = False
@@ -287,13 +287,13 @@ class Zoopla(SearchEngine):
 
     def get_new_rooms(self):
         for area in self.AREAS:
-            print 'Searching for {area} flats in Zoopla'.format(area=area)
+            print('Searching for {area} flats in Zoopla'.format(area=area))
 
             # first request
             self.preferences['q'] = area.replace(' ', '+').lower()
 
             for page in range(1, self.preferences['max_range']+1):
-                print 'Search in page {page} of {area}'.format(page=page, area=area)
+                print('Search in page {page} of {area}'.format(page=page, area=area))
                 self.preferences['pn'] = page
                 get_params = '&'.join(['{key}={value}'.format(key=key, value=self.preferences[key]) if key != 'when' and key != 'max_range' else '' for key in self.preferences]).replace('&&', '&').lower()
                 url = '{location}/{endpoint}/{query}/?{params}'.format(location=self.location, endpoint=self.search_endpoint, query=self.preferences['q'].replace('+', '-'), params=get_params)
@@ -326,7 +326,7 @@ class Zoopla(SearchEngine):
             self.save_rooms()
 
     def get_room_info(self, room_id, search):
-        print 'Getting {id} flat details'.format(id=room_id)
+        print('Getting {id} flat details'.format(id=room_id))
         # http://www.zoopla.co.uk/to-rent/details/35664773
         url = '{location}/{endpoint}{id}'.format(location=self.location, endpoint=self.details_endpoint, id=room_id)
         soup = BeautifulSoup(requests.get(url).text)
@@ -387,13 +387,13 @@ class Gumtree(SearchEngine):
 
     def get_new_rooms(self):
         for area in self.AREAS:
-            print 'Searching for {area} flats in Gumtree'.format(area=area)
+            print('Searching for {area} flats in Gumtree'.format(area=area))
 
             # first request
             self.preferences['search_location'] = area.replace(' ', '+')
 
             for page in range(1, self.preferences['max_range']+1):
-                print 'Search in page {page} of {area}'.format(page=page, area=area)
+                print('Search in page {page} of {area}'.format(page=page, area=area))
                 self.preferences['page'] = page
                 get_params = '&'.join(['{key}={value}'.format(key=key, value=self.preferences[key]) if key != 'when' and key != 'max_range' else '' for key in self.preferences]).replace('&&', '&').lower()
                 url = '{location}/{endpoint}?{params}'.format(location=self.location, endpoint=self.search_endpoint, params=get_params)
@@ -411,7 +411,7 @@ class Gumtree(SearchEngine):
             self.save_rooms()
 
     def get_room_info(self, room_id, search):
-        print 'Getting {id} flat details'.format(id=room_id)
+        print('Getting {id} flat details'.format(id=room_id))
         # http://www.gumtree.com/p/1-bedroom-rent/room/1097015914
         url = '{location}/{endpoint}{id}'.format(location=self.location, endpoint=self.details_endpoint, id=room_id)
         soup = BeautifulSoup(requests.get(url).text)
@@ -495,7 +495,7 @@ class SpareRoom(SearchEngine):
 
     def search_rooms_in(self, area):
         if settings.VERBOSE:
-            print 'Searching for {area} flats in SpareRoom'.format(area=area)
+            print('Searching for {area} flats in SpareRoom'.format(area=area))
 
         self.preferences['page'] = 1
         self.preferences['where'] = area.lower()
@@ -505,7 +505,7 @@ class SpareRoom(SearchEngine):
         try:
             results = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
             if settings.VERBOSE:
-                print 'Parsing page {page}/{total} flats in {area}'.format(page=results['page'], total=results['pages'], area=area)
+                print('Parsing page {page}/{total} flats in {area}'.format(page=results['page'], total=results['pages'], area=area))
 
             for room in results['results']:
                 room_id = room['advert_id']
@@ -516,7 +516,7 @@ class SpareRoom(SearchEngine):
                 self.get_room_info(room_id, area)
                 self.rate_room(room_id)
         except Exception as e:
-            print e
+            print(e)
             return None
 
         for page in range(1, int(results['pages'])):
@@ -525,7 +525,7 @@ class SpareRoom(SearchEngine):
             url = '{location}/{endpoint}?{params}'.format(location=self.api_location, endpoint=self.api_search_endpoint, params=params)
             results = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
             if settings.VERBOSE:
-                print 'Parsing page {page}/{total} flats in {area}'.format(page=results['page'], total=results['pages'], area=area)
+                print('Parsing page {page}/{total} flats in {area}'.format(page=results['page'], total=results['pages'], area=area))
 
             for room in results['results']:
                 room_id = room['advert_id']
@@ -538,7 +538,7 @@ class SpareRoom(SearchEngine):
 
     def get_room_info(self, room_id, search):
         if settings.VERBOSE:
-            print 'Getting {id} flat details'.format(id=room_id)
+            print('Getting {id} flat details'.format(id=room_id))
 
         url = '{location}/{endpoint}/{id}?format=json'.format(location=self.api_location, endpoint=self.api_details_endpoint, id=room_id)
         try:
@@ -550,7 +550,7 @@ class SpareRoom(SearchEngine):
 
         if 'days_of_wk_available' in room['advert_summary'] and room['advert_summary']['days_of_wk_available'] != '7 days a week':
             if settings.VERBOSE:
-                print 'Room availability: {avail} -> Removing'.format(avail=room['advert_summary']['days_of_wk_available'])
+                print('Room availability: {avail} -> Removing'.format(avail=room['advert_summary']['days_of_wk_available']))
             return None
 
         phone = room['advert_summary']['tel'] if 'tel' in room['advert_summary'] else room['advert_summary']['tel_formatted'] if 'tel_formatted' in room['advert_summary'] else False
@@ -617,7 +617,7 @@ def main():
         try:
             max_range = int(argv[argv.index('--max-range') + 1])
         except (ValueError, IndexError):
-            print 'Error: no max range given...'; exit(0)
+            print('Error: no max range given...'); exit(0)
 
     if '-v' in argv or '--verbose' in argv:
         settings.VERBOSE = True
@@ -629,10 +629,10 @@ def main():
         settings.FORCE = True
 
     if len(argv) < 2 or '--help' in argv or '-h' in argv:
-        print 'Usage: {command} --spareroom --gumtree --zoopla [ -v | -f ] [ --max-range range ]'.format(command=argv[0])
-        print '    -v : verbose'
-        print '    -f : mark all rooms as not seen and re-rates them again'
-        print '    -max-range range: max pages to search in each search engine / area'
+        print('Usage: {command} --spareroom --gumtree --zoopla [ -v | -f ] [ --max-range range ]'.format(command=argv[0]))
+        print('    -v : verbose')
+        print('    -f : mark all rooms as not seen and re-rates them again')
+        print('    -max-range range: max pages to search in each search engine / area')
         exit(0)
 
     if '--spareroom' in argv:
