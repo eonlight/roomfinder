@@ -26,10 +26,10 @@ Finds and Scores rooms on Spareroom, Gumtree and Zoopla
 * Other Options (only on spare room for now)
     * --force or -f (forces fetch information of already fetched room)
     * --verbose or -v
-* Also added the options to remove search engines from the script
-    * --no-spareroom
-    * --no-gumtree
-    * --no-zoopla
+* Also added the options to add specific search engines from the script
+    * --spareroom
+    * --gumtree
+    * --zoopla
 
 ### Reports
 

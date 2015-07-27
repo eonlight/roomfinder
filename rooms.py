@@ -1,45 +1,93 @@
 #!/usr/bin/env python
 from datetime import datetime
 from bs4 import BeautifulSoup
-from sys import argv
-import settings
+from pprint import pprint
+from sys import argv, exit
 import requests
+import logging
 import json
 import re
 
+# local settings
+import settings
+
 class SearchEngine(object):
 
+    # file to store the rooms in
     file_name = 'rooms.json'
+
+    # preferences used to make queries to the web application
     preferences = {}
 
-    def __init__(self, preferences={}, areas=None, cookies={}):
+    def __init__(self, preferences=None, areas=None, cookies=None):
+        """
+        Create a SearchEngine object.
+
+        preferences -- preferences to be merged with the default preferences
+        areas -- areas to search rooms in
+        cookies -- cookies to be used when making requests to the server
+        """
+
         self.AREAS = areas or []
-        self.cookies = cookies
+        self.cookies = cookies or {}
+
+        # merges the preferences from the settings file
         if preferences:
             for key in preferences:
                 self.preferences[key] = preferences[key]
+
+        # will hold all the rooms found in self engine
         self.rooms = {}
+
+        # loads rooms from file
         self.load_rooms(settings.MARK_OLD)
 
     def load_rooms(self, clean=True):
+        """
+        Loads rooms from file if it exists. In case of error will clean the
+        rooms variable.
+
+        clean -- if set to true will mark the loaded rooms as not new
+        """
+
         try:
+            # try opening the files with the rooms and load it as a json file
             with open(self.file_name, 'r') as f:
                 self.rooms = json.loads(f.read())
+
+            # mark all loaded rooms as old if clean=True
             if clean:
                 self.mark_as_old()
-        except:
+
+        # catch exception if the file does not exist or if json.loads fail
+        except (IOError, ValueError) as e:
+            logging.warning(e.strerror, extra={'engine': self.__class__.__name__, 'function': 'load_rooms'})
+            # don't load any rooms
             self.rooms = {}
 
     def save_rooms(self):
-        with open(self.file_name, 'w') as f:
-            f.write(json.dumps(self.rooms))
+        """Saves the found rooms in the defined file."""
+
+        # save the rooms found in the file
+        try:
+            with open(self.file_name, 'w') as f:
+                f.write(json.dumps(self.rooms))
+
+        # catch exceptions in case it cannot create the file or something wrong
+        # with json.dumps
+        except (IOError, ValueError) as e:
+            logging.error(e.strerror, extra={'engine': self.__class__.__name__, 'function': 'save_rooms'})
 
     def mark_as_old(self):
+        """Marks the loaded rooms as not new."""
+
         for room in self.rooms:
             self.rooms[room]['new'] = False
         self.save_rooms()
 
     def get_sorted(self):
+        """Returns an array of rooms sorted by score."""
+
         nrooms = {}
         for room in self.rooms:
             nrooms[int(room)] = self.rooms[room]
@@ -63,13 +111,13 @@ class SearchEngine(object):
                 continue
         self.save_rooms()
 
-    def generate_report(self, fields=None, pref_ids=[], max_range=-1, when=False):
+    def generate_report(self, fields=None, pref_ids=[], max_range=-1, when=False, areas=False):
         name = str(self.__class__.__name__).split(' ')[0]
-        html = '<html><head><title>%s Classified Ads</title><link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css"></head><body>' % name
+        html = '<html><head><title>{name} Classified Ads</title><link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css"></head><body>'.format(name=name)
         html += '<table class="table">'
         html += '<thead><tr>'
         for field in fields:
-            html += '<th>%s</th>' % field.replace('_', ' ').capitalize()
+            html += '<th>{field}</th>'.format(field=field.replace('_', ' ').capitalize())
         html += '</tr></thead><tbody>'
         for i, room in enumerate(self.get_sorted()):
             if when:
@@ -82,21 +130,21 @@ class SearchEngine(object):
                     if available_time < WHEN:
                         continue
 
-            if room['new'] or room['id'] in pref_ids:
+            if (room['new'] or room['id'] in pref_ids) and room['search'] in self.AREAS:
                 htmlclass = 'success' if room['new'] else 'danger' if room['id'] in pref_ids else 'info'
-                html += '<tr class="%s">' % htmlclass
+                html += '<tr class="{css}">'.format(css=htmlclass)
                 for field in fields:
                     if field == 'id':
-                        url = '%s/%s%s' % (self.location, self.details_endpoint, room['id'])
-                        html += '<td><a href="%s">%s</td>' % (url, room[field])
+                        url = '{location}/{endpoint}{id}'.format(location=self.location, endpoint=self.details_endpoint, id=room['id'])
+                        html += '<td><a href="{url}">{field}</td>'.format(url=url, field=room[field])
                     elif field == 'images':
-                        pics = ['<a href="%s"><img src="%s" height="100" width="100"></a>' % (img, img) for img in room['images']]
+                        pics = ['<a href="{url}"><img src="{src}" height="100" width="100"></a>'.format(url=img, src=img) for img in room['images']]
                         images = ''
                         for i in range(5):
                             images += pics[i] if len(pics) > i else ''
-                        html += '<td>%s</td>' % images
+                        html += '<td>{images}</td>'.format(images=images)
                     else:
-                        html += '<td>%s</td>' % room[field]
+                        html += '<td>{value}</td>'.format(value=room[field])
                 html += '</tr>'
                 max_range -= 1
 
@@ -112,36 +160,85 @@ class SearchEngine(object):
         if not key or key not in self.rooms:
             return
 
-        score = 0
+        """Score variables:
+        price + deposit - 0.10
+        bills inc - 0.05
+        area - 0.25
+        rooms - 0.20
+        housemates - 0.20
+        pictures - 0.05
+        available - 0.15
+
+        all score from 0 to 100
+        """
+
         room = self.rooms[key]
 
         areas = [area.lower() for area in self.AREAS]
         # check station, give better score if first stations
-        score += (len(areas) - areas.index(room['station'].lower()))*50 if room['station'].lower() in areas else 0
+        area_score = (len(areas) - areas.index(room['station'].lower()))*(100/len(areas)) if room['station'].lower() in areas else 0
+
+        score = area_score * 0.25
+
+        if settings.DEBUG:
+            print "AREA SCORE: {score}".format(score=area_score)
 
         # lower price -> better score
         price = min(room['prices'])
         MAX_RENT_PM = self.preferences['max_rent']
-        score += 100 if price < MAX_RENT_PM - 150 else 80 if price < MAX_RENT_PM - 100 else 50 if price < MAX_RENT_PM - 50 else 20 if price < MAX_RENT_PM else 0
+        difference = abs(int(price) - MAX_RENT_PM)
+        price_score = max(0, 50 - (difference)/10) if price >= MAX_RENT_PM else min(100, 50 + (difference)/10)
 
-        # lower deposit -> better score
-        # if not deposit information -> 0
-        deposit = min(room['deposits']) if len(room['deposits']) > 0 else -1
-        score += 20 if deposit != -1 and deposit <= price else 0
+        if settings.DEBUG:
+            print "PRICE SCORE: {score}".format(score=price_score)
 
-        # bills includes - better score
-        score += 100 if room['bills'] else 0
+        score += price_score*0.05
+
+        #score += 100 if price < MAX_RENT_PM - 150 else 80 if price < MAX_RENT_PM - 100 else 50 if price < MAX_RENT_PM - 50 else 20 if price < MAX_RENT_PM else 0
+
+        deposit = min(room['deposits']) if len(room['deposits']) > 0 else 0
+        difference = abs(int(deposit) - MAX_RENT_PM)
+        deposit_score = max(0, 50 - (difference)/10) if deposit >= MAX_RENT_PM else min(50, 50 + (difference)/10)
+        #score += 20 if deposit != -1 and deposit <= price else 0
+
+        if settings.DEBUG:
+            print "DEPOSIT SCORE: {score}".format(score=deposit_score)
+
+        score += deposit_score*0.05
+
+        # bills includes - better score - 0.05
+        score += 5 if room['bills'] else 0
+
+        rooms_score = max(0, 100 - (int(room['rooms']) - 1)*15)
+
+        if settings.DEBUG:
+            print "ROOMS SCORE: {score}".format(score=rooms_score)
+
+        score += rooms_score*0.20
 
         # less housemates - better score
         if room['housemates'] != -1:
-            score += 50 if room['housemates'] < 0 else 40 if room['housemates'] < 2 else 30 if room['housemates'] < 4 else 0
+            housemates_score = max(0, 100 - (int(room['housemates']) - 1)*10)/2
+            housemates_score += int(room['females'])/int(room['housemates'])*100/2
+            #score += 50 if room['housemates'] < 0 else 40 if room['housemates'] < 2 else 30 if room['housemates'] < 4 else 0
+
+            if settings.DEBUG:
+                print "HOUSEMATES SCORE: {score}".format(score=housemates_score)
+
+            score += housemates_score*0.20
 
         # more images - better score
         # no images -> -100
-        score += 7*len(room['images']) if len(room['images']) > 0 else - 100
+        #score += 7*len(room['images']) if len(room['images']) > 0 else - 100
+        image_score = min(100, 25*len(room['images']))
+
+        if settings.DEBUG:
+            print "IMAGE SCORE: {score}".format(score=image_score)
+
+        score += image_score*0.05
 
         # if phone - better score
-        score += 100 if room['phone'] else 0
+        #score += 100 if room['phone'] else 0
 
         # the closer (or now) the room is available to desired - better score
         try:
@@ -149,8 +246,18 @@ class SearchEngine(object):
         except:
             available_time = datetime.strptime(room['timestamp'], "%Y-%m-%d %H:%M:%S.%f")
 
-        difference = (self.preferences['when'] - available_time).total_seconds()
-        score += 100 if difference > 0 else 80 if difference > -2880 else 50 if difference > -7200 else 0
+        difference = abs((self.preferences['when'] - available_time).total_seconds())
+        #score += 100 if difference > 0 else 80 if difference > -2880 else 50 if difference > -7200 else 0
+        available_score = max(0, 100 - (difference/60/60/24))
+
+        if settings.DEBUG:
+            print "AVAILABLE SCORE: {score}".format(score=available_score)
+
+        score += image_score*0.15
+
+        if settings.DEBUG:
+            print "FINAL SCORE: {score}".format(score=score)
+
         if (settings.MIN_AVAILABLE_TIME - available_time).total_seconds() > 0:
             self.rooms[key]['new'] = False
             score = 0
@@ -180,21 +287,20 @@ class Zoopla(SearchEngine):
 
     def get_new_rooms(self):
         for area in self.AREAS:
-            print 'Searching for %s flats in Zoopla' % area
+            print 'Searching for {area} flats in Zoopla'.format(area=area)
 
             # first request
             self.preferences['q'] = area.replace(' ', '+').lower()
 
             for page in range(1, self.preferences['max_range']+1):
-                print 'Search in page %s of %s' % (page, area)
+                print 'Search in page {page} of {area}'.format(page=page, area=area)
                 self.preferences['pn'] = page
-                get_params = '&'.join(['%s=%s' % (key, self.preferences[key]) if key != 'when' and key != 'max_range' else '' for key in self.preferences]).replace('&&', '&').lower()
-                #url = '%s/%s/london/%s/?%s' % (self.location, self.search_endpoint, self.preferences['q'].replace('+', '-'), get_params)
-                url = '%s/%s/%s/?%s' % (self.location, self.search_endpoint, self.preferences['q'].replace('+', '-'), get_params)
+                get_params = '&'.join(['{key}={value}'.format(key=key, value=self.preferences[key]) if key != 'when' and key != 'max_range' else '' for key in self.preferences]).replace('&&', '&').lower()
+                url = '{location}/{endpoint}/{query}/?{params}'.format(location=self.location, endpoint=self.search_endpoint, query=self.preferences['q'].replace('+', '-'), params=get_params)
                 soup = BeautifulSoup(requests.get(url).text)
 
                 if not soup('div', {'class': 'result-count'}):
-                    url = '%s/%s/%s/?%s' % (self.location, self.search_endpoint, self.preferences['q'].replace('+', '-'), get_params)
+                    url = '{location}/{endpoint}/{query}/?{params}'.format(location=self.location, endpoint=self.search_endpoint, query=self.preferences['q'].replace('+', '-'), params=get_params)
                     soup = BeautifulSoup(requests.get(url).text)
 
                 if soup('div', {'class': 'result-count'}) and re.search('of \d+', soup('div', {'class': 'result-count'})[0].text):
@@ -220,9 +326,9 @@ class Zoopla(SearchEngine):
             self.save_rooms()
 
     def get_room_info(self, room_id, search):
-        print 'Getting %s flat details' % room_id
+        print 'Getting {id} flat details'.format(id=room_id)
         # http://www.zoopla.co.uk/to-rent/details/35664773
-        url = '%s/%s%s' % (self.location, self.details_endpoint, room_id)
+        url = '{location}/{endpoint}{id}'.format(location=self.location, endpoint=self.details_endpoint, id=room_id)
         soup = BeautifulSoup(requests.get(url).text)
 
         prices = [int(re.search('\d+', soup('div', {'class': 'text-price'})[0].text).group())] # pcm
@@ -281,16 +387,16 @@ class Gumtree(SearchEngine):
 
     def get_new_rooms(self):
         for area in self.AREAS:
-            print 'Searching for %s flats in Gumtree' % area
+            print 'Searching for {area} flats in Gumtree'.format(area=area)
 
             # first request
             self.preferences['search_location'] = area.replace(' ', '+')
 
             for page in range(1, self.preferences['max_range']+1):
-                print 'Search in page %s of %s' % (page, area)
+                print 'Search in page {page} of {area}'.format(page=page, area=area)
                 self.preferences['page'] = page
-                get_params = '&'.join(['%s=%s' % (key, self.preferences[key]) if key != 'when' and key != 'max_range' else '' for key in self.preferences]).replace('&&', '&').lower()
-                url = '%s/%s?%s' % (self.location, self.search_endpoint, get_params)
+                get_params = '&'.join(['{key}={value}'.format(key=key, value=self.preferences[key]) if key != 'when' and key != 'max_range' else '' for key in self.preferences]).replace('&&', '&').lower()
+                url = '{location}/{endpoint}?{params}'.format(location=self.location, endpoint=self.search_endpoint, params=get_params)
 
                 soup = BeautifulSoup(requests.get(url).text)
                 for link in soup('a', {'class': 'listing-link'}):
@@ -305,9 +411,9 @@ class Gumtree(SearchEngine):
             self.save_rooms()
 
     def get_room_info(self, room_id, search):
-        print 'Getting %s flat details' % room_id
+        print 'Getting {id} flat details'.format(id=room_id)
         # http://www.gumtree.com/p/1-bedroom-rent/room/1097015914
-        url = '%s/%s%s' % (self.location, self.details_endpoint, room_id)
+        url = '{location}/{endpoint}{id}'.format(location=self.location, endpoint=self.details_endpoint, id=room_id)
         soup = BeautifulSoup(requests.get(url).text)
 
         phone = soup('strong', {'itemprop': 'telephone'})[0].text if len(soup('strong', {'itemprop': 'telephone'})) > 0 else None
@@ -378,7 +484,8 @@ class SpareRoom(SearchEngine):
         'room_types': settings.TYPE,
         'rooms_for': settings.FOR,
         'max_per_page': settings.MAX_RESULTS,
-        'where': 'paddington'
+        'where': 'paddington',
+        'ensuit': 'Y',
     }
 
     def get_new_rooms(self):
@@ -388,17 +495,17 @@ class SpareRoom(SearchEngine):
 
     def search_rooms_in(self, area):
         if settings.VERBOSE:
-            print 'Searching for %s flats in SpareRoom' % area
+            print 'Searching for {area} flats in SpareRoom'.format(area=area)
 
         self.preferences['page'] = 1
         self.preferences['where'] = area.lower()
-        params = '&'.join(['%s=%s' % (key, self.preferences[key]) for key in self.preferences])
-        url = '%s/%s?%s' % (self.api_location, self.api_search_endpoint, params)
+        params = '&'.join(['{key}={value}'.format(key=key, value=self.preferences[key]) for key in self.preferences])
+        url = '{location}/{endpoint}?{params}'.format(location=self.api_location, endpoint=self.api_search_endpoint, params=params)
 
         try:
             results = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
             if settings.VERBOSE:
-                print 'Parsing page %s/%s flats in %s' % (results['page'], results['pages'], area)
+                print 'Parsing page {page}/{total} flats in {area}'.format(page=results['page'], total=results['pages'], area=area)
 
             for room in results['results']:
                 room_id = room['advert_id']
@@ -408,16 +515,17 @@ class SpareRoom(SearchEngine):
 
                 self.get_room_info(room_id, area)
                 self.rate_room(room_id)
-        except:
+        except Exception as e:
+            print e
             return None
 
         for page in range(1, int(results['pages'])):
             self.preferences['page'] = page + 1
-            params = '&'.join(['%s=%s' % (key, self.preferences[key]) for key in self.preferences])
-            url = '%s/%s?%s' % (self.api_location, self.api_search_endpoint, params)
+            params = '&'.join(['{key}={value}'.format(key=key, value=self.preferences[key]) for key in self.preferences])
+            url = '{location}/{endpoint}?{params}'.format(location=self.api_location, endpoint=self.api_search_endpoint, params=params)
             results = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
             if settings.VERBOSE:
-                print 'Parsing page %s/%s flats in %s' % (results['page'], results['pages'], area)
+                print 'Parsing page {page}/{total} flats in {area}'.format(page=results['page'], total=results['pages'], area=area)
 
             for room in results['results']:
                 room_id = room['advert_id']
@@ -430,17 +538,19 @@ class SpareRoom(SearchEngine):
 
     def get_room_info(self, room_id, search):
         if settings.VERBOSE:
-            print 'Getting %s flat details' % room_id
+            print 'Getting {id} flat details'.format(id=room_id)
 
-        url = '%s/%s/%s?format=json' % (self.api_location, self.api_details_endpoint, room_id)
+        url = '{location}/{endpoint}/{id}?format=json'.format(location=self.api_location, endpoint=self.api_details_endpoint, id=room_id)
         try:
             room = json.loads(requests.get(url, cookies=self.cookies, headers=self.headers).text)
+            if settings.DEBUG:
+                pprint(room)
         except:
             return None
 
         if 'days_of_wk_available' in room['advert_summary'] and room['advert_summary']['days_of_wk_available'] != '7 days a week':
             if settings.VERBOSE:
-                print 'Room availability: %s -> Removing' % room['advert_summary']['days_of_wk_available']
+                print 'Room availability: {avail} -> Removing'.format(avail=room['advert_summary']['days_of_wk_available'])
             return None
 
         phone = room['advert_summary']['tel'] if 'tel' in room['advert_summary'] else room['advert_summary']['tel_formatted'] if 'tel_formatted' in room['advert_summary'] else False
@@ -448,6 +558,8 @@ class SpareRoom(SearchEngine):
         station = room['advert_summary']['nearest_station']['station_name'] if 'nearest_station' in room['advert_summary'] else search
         images = [img['large_url'] for img in room['advert_summary']['photos']] if 'photos' in room['advert_summary'] else []
         available = room['advert_summary']['available'] if 'available' in room['advert_summary'] else 'Now'
+        females = room['advert_summary']['number_of_females'] if 'number_of_females' in room['advert_summary'] else 0
+        males = room['advert_summary']['number_of_males'] if 'number_of_males' in room['advert_summary'] else 0
 
         try:
             available_timestamp = datetime.now() if available == 'Now' else datetime.strptime(available, "%d %b %Y")
@@ -472,6 +584,8 @@ class SpareRoom(SearchEngine):
         else:
             prices.append(room['advert_summary']['min_rent'] if 'min_rent' in room['advert_summary'] else room['advert_summary']['max_rent'] if 'max_rent' in room['advert_summary'] else None)
 
+
+
         new = True
 
         self.rooms[room_id] = {
@@ -486,26 +600,42 @@ class SpareRoom(SearchEngine):
             'bills': bills,
             'rooms': rooms_no,
             'housemates': housemates,
+            'females': females,
+            'males': males,
             'phone': phone,
             'new': new,
         }
 
 def main():
 
+    # setup logging configuirations
+    LOG_FORMAT = '%(asctime)s - %(engine)s - %(function)s - %(message)s'
+    logging.basicConfig(format=LOG_FORMAT)
+
     max_range = -1
     if '--max-range' in argv:
         try:
             max_range = int(argv[argv.index('--max-range') + 1])
         except (ValueError, IndexError):
-            print 'Error: o max range given...'; exit(0)
+            print 'Error: no max range given...'; exit(0)
 
     if '-v' in argv or '--verbose' in argv:
         settings.VERBOSE = True
 
+    if '-d' in argv or '--verbose' in argv:
+        settings.DEBUG = True
+
     if '-f' in argv or '--force' in argv:
         settings.FORCE = True
 
-    if not '--no-spareroom' in argv:
+    if len(argv) < 2 or '--help' in argv or '-h' in argv:
+        print 'Usage: {command} --spareroom --gumtree --zoopla [ -v | -f ] [ --max-range range ]'.format(command=argv[0])
+        print '    -v : verbose'
+        print '    -f : mark all rooms as not seen and re-rates them again'
+        print '    -max-range range: max pages to search in each search engine / area'
+        exit(0)
+
+    if '--spareroom' in argv:
         spareroom_preferences = {
             'when': settings.WHEN,
             'max_rent': settings.MAX_RENT_PM,
@@ -515,7 +645,7 @@ def main():
         }
         spareroom = SpareRoom(spareroom_preferences, settings.AREAS, settings.SPAREROOM_COOKIES)
 
-    if not '--no-gumtree' in argv:
+    if '--gumtree' in argv:
         gumtree_preferences = {
             'when': settings.WHEN,
             'max_rent': settings.MAX_RENT_PM,
@@ -524,7 +654,7 @@ def main():
         }
         gumtree = Gumtree(gumtree_preferences, settings.AREAS)
 
-    if not '--no-zoopla' in argv:
+    if '--zoopla' in argv:
         zoopla_preferences = {
             'when': settings.WHEN,
             'max_range': 5,
@@ -534,25 +664,31 @@ def main():
         zoopla = Zoopla(zoopla_preferences, settings.AREAS)
 
     if '--rate' in argv:
-        if not '--no-spareroom' in argv:
+        if '--spareroom' in argv:
             spareroom.rate()
-        if not '--no-gumtree' in argv:
+        if '--gumtree' in argv:
             gumtree.rate()
-        if not '--no-zoopla' in argv:
+        if '--zoopla' in argv:
             zoopla.rate()
+    elif '--room' in argv:
+        room_id = argv[argv.index('--room') + 1]
+        if '--spareroom' in argv:
+            pprint(spareroom.get_room_info(room_id, room_id))
+            spareroom.rate_room(room_id)
+            exit(0)
     else:
-        if not '--no-spareroom' in argv:
+        if '--spareroom' in argv:
             spareroom.get_new_rooms()
-        if not '--no-gumtree' in argv:
+        if '--gumtree' in argv:
             gumtree.get_new_rooms()
-        if not '--no-zoopla' in argv:
+        if '--zoopla' in argv:
             zoopla.get_new_rooms()
 
-    if not '--no-spareroom' in argv:
+    if '--spareroom' in argv:
         spareroom.generate_report(fields=settings.FIELDS, pref_ids=settings.SPAREROOM_PREF_IDS, max_range=max_range)
-    if not '--no-gumtree' in argv:
+    if '--gumtree' in argv:
         gumtree.generate_report(fields=settings.FIELDS, pref_ids=settings.GUMTREE_PREF_IDS, max_range=max_range)
-    if not '--no-zoopla' in argv:
+    if '--zoopla' in argv:
         zoopla.generate_report(fields=settings.FIELDS, pref_ids=settings.ZOOPLA_PREF_IDS, max_range=max_range)
 
 if __name__ == "__main__":

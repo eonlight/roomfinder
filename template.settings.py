@@ -23,3 +23,5 @@ MARK_OLD = False # True: mark rooms already fetched as old and doesn't show on r
 FORCE = False # forces fetch information on rooms already in list
 VERBOSE = False # prints information of what the script is doing
 MAX_RESULTS = 20 # max results asked in each request
+
+DEBUG = False
