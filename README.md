@@ -1,41 +1,41 @@
 # RoomFinder
 
-### Short Description
-Finds and Scores rooms on Spareroom, Gumtree and Zoopla
+Finds and Scores rooms on Spareroom (removed the support for Gumtree and Zoopla)
 
-### How to:
-
-#### Install
+### How to Install
 * git clone https://github.com/eonlight/roomfinder.git
 
-#### Configure
+### How to Configure
 * cp template.settings.py settings.py
-* edit at least:
-    * MAX\_RENT\_PM
-    * MAX\_RENT\_PW
-    * AREAS
-    * FOR
+* edit the required fields
 
-#### Run
-* Normal (Fetches new results)
-    * python rooms.py
-* Rate (Re-rates the fetched rooms and marks them as new)
-    * python rooms.py --rate
-* Optional Parameter (number of rooms to be included on the report)
-    * python rooms.py --max-range 100
-* Other Options (only on spare room for now)
-    * --force or -f (forces fetch information of already fetched room)
-    * --verbose or -v
-* Also added the options to add specific search engines from the script
-    * --spareroom
-    * --gumtree
-    * --zoopla
+#### Running Examples
+
+* Simple fast fetch and score max 100 rooms
+```
+python rooms.py --spareroom -v -f --fast --sleep 0.2 --max-rooms 100 --max-pages 3
+```
+
+* Simple full fetch
+```
+python rooms.py --spareroom -v -f --sleep 0.5 --max-rooms 500 --max-pages 10
+```
+
+* --help
+```
+Usage: rooms.py --spareroom [ -v | -f ] [ --max-rooms rooms ] [ --max-pages pages ] [ --sleep sec ] [ --fast ]
+    -v : verbose
+    -f : mark all rooms as not seen and re-rates them again
+    --max-rooms rooms : max rooms in final report
+    --max-pages pages : max to search in every area
+    --sleep sec : sec to sleep on every request (spareroom's sending 500 responses)
+    --fast : does not make a request for every room (worst scores in the algorithm)
+    --room room : fetchs the information of a room, re-rates it and displays it in the terminal
+```
 
 ### Reports
 
 You can choose what fields appear on the report, I found that that these are the ones that most help me.
-
-It generates 3 HTML files with the fetched rooms for each website.
 
 ### Future and other stuffs
 
