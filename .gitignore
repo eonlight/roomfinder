@@ -55,5 +55,7 @@ target/
 
 # settings and stuffs
 settings.py
+savedata
 *.json
 *.html
+*.bk

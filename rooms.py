@@ -1,18 +1,22 @@
 #!/usr/bin/env python
 from datetime import datetime
-from bs4 import BeautifulSoup
 from pprint import pprint
 from sys import argv, exit
 from time import sleep
 import requests
 import logging
 import json
-import re
+
+# argparser
+import argparse
+
+import traceback
 
 # local settings
-import settings
+from types import ModuleType
+settings = ModuleType("settings")
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 class SearchEngine(object):
 
@@ -22,27 +26,14 @@ class SearchEngine(object):
     # preferences used to make queries to the web application
     preferences = {}
 
-    # variables that need to be in the settings module
-    required_settings = ['SLEEP', 'MIN_AVAILABLE_TIME']
-
-    def __init__(self, preferences=None, areas=None, cookies=None, required_settings=None):
+    def __init__(self, preferences=None, areas=None, cookies=None):
         """
         Create a SearchEngine object.
 
         preferences -- preferences to be merged with the default preferences
         areas -- areas to search rooms in
         cookies -- cookies to be used when making requests to the server
-        required_settings -- settings to merge with required_settings
         """
-
-        # merges the required settings and verify if they exist
-        if required_settings:
-            self.required_settings = list(set(required_settings + self.required_settings))
-
-        for prop in self.required_settings:
-            if not hasattr(settings, prop):
-                print('Required settings property {prop} not found in the settings module'.format(prop=prop))
-                exit(0)
 
         self.AREAS = areas or []
         self.cookies = cookies or {}
@@ -56,7 +47,7 @@ class SearchEngine(object):
         self.rooms = {}
 
         # loads rooms from file
-        self.load_rooms(settings.MARK_OLD)
+        self.load_rooms()
 
     def make_get_request(self, url=None, headers=None, cookies=None, proxies=None):
         if settings.DEBUG:
@@ -64,22 +55,16 @@ class SearchEngine(object):
         sleep(settings.SLEEP)
         return requests.get(url, cookies=self.cookies, headers=self.headers).text
 
-    def load_rooms(self, clean=True):
+    def load_rooms(self):
         """
         Loads rooms from file if it exists. In case of error will clean the
         rooms variable.
-
-        clean -- if set to true will mark the loaded rooms as not new
         """
 
         try:
             # try opening the files with the rooms and load it as a json file
             with open(self.file_name, 'r') as f:
                 self.rooms = json.loads(f.read())
-
-            # mark all loaded rooms as old if clean=True
-            if clean:
-                self.mark_as_old()
 
         # catch exception if the file does not exist or if json.loads fail
         except (IOError, ValueError) as e:
@@ -100,13 +85,6 @@ class SearchEngine(object):
         except (IOError, ValueError) as e:
             logging.error(e.strerror, extra={'engine': self.__class__.__name__, 'function': 'save_rooms'})
 
-    def mark_as_old(self):
-        """Marks the loaded rooms as not new."""
-
-        for room in self.rooms:
-            self.rooms[room]['new'] = False
-        self.save_rooms()
-
     def get_sorted(self):
         """Returns an array of rooms sorted by score."""
 
@@ -119,10 +97,17 @@ class SearchEngine(object):
         for room in self.rooms:
             try:
                 self.rooms[room]['new'] = True
+                if settings.UPDATE:
+                    room = self.get_room_info(self.rooms[room]['id'], self.rooms[room]['search'])
                 self.rate_room(room)
-            except:
+            except Exception as e:
+                if settings.DEBUG:
+                    print("Error rating room: {message}".format(message=e.message))
                 continue
         self.save_rooms()
+
+    def get_room_info(self, room_id, search):
+        pass
 
     def update(self):
         for room in self.rooms:
@@ -158,7 +143,7 @@ class SearchEngine(object):
                 for field in fields:
                     if field == 'id':
                         url = '{location}/{endpoint}{id}'.format(location=self.location, endpoint=self.details_endpoint, id=room['id'])
-                        html += '<td><a href="{url}">{field}</td>'.format(url=url, field=room[field])
+                        html += '<td><a target="_blank" href="{url}">{field}</td>'.format(url=url, field=room[field])
                     elif field == 'images':
                         pics = ['<a href="{url}"><img src="{src}" height="100" width="100"></a>'.format(url=img, src=img) for img in room['images']]
                         images = ''
@@ -178,9 +163,21 @@ class SearchEngine(object):
         with open(self.file_name.replace('.json', '.html'), 'w') as f:
             f.write(html.encode('utf-8'))
 
+    def get_score(self, scores=None, key=None):
+        if not scores or not key:
+            return 0.0
+
+        for i, a in enumerate(settings.PREFERENCES):
+            if key.startswith(a[0]):
+                if settings.DEBUG:
+                    print("    {key}: {score}".format(key=key, score=scores[i]))
+                return scores[i]
+
     def rate_room(self, key=None):
         if not key or key not in self.rooms:
             return
+
+        SCORES = [0.25, 0.20, 0.20, 0.15, 0.10, 0.05, 0.05]
 
         """Score variables:
         price + deposit - 0.10
@@ -200,10 +197,10 @@ class SearchEngine(object):
         # check station, give better score if first stations
         area_score = (len(areas) - areas.index(room['station'].lower()))*(100/len(areas)) if room['station'].lower() in areas else 0
 
-        score = area_score * 0.25
-
         if settings.DEBUG:
             print("AREA SCORE: {score}".format(score=area_score))
+
+        score = area_score * self.get_score(SCORES, 'areas')
 
         # lower price -> better score
         price = min(room['prices'])
@@ -214,7 +211,7 @@ class SearchEngine(object):
         if settings.DEBUG:
             print("PRICE SCORE: {score}".format(score=price_score))
 
-        score += price_score*0.05
+        score += price_score * self.get_score(SCORES, 'price') * 3 / 4
 
         #score += 100 if price < MAX_RENT_PM - 150 else 80 if price < MAX_RENT_PM - 100 else 50 if price < MAX_RENT_PM - 50 else 20 if price < MAX_RENT_PM else 0
 
@@ -226,17 +223,17 @@ class SearchEngine(object):
         if settings.DEBUG:
             print("DEPOSIT SCORE: {score}".format(score=deposit_score))
 
-        score += deposit_score*0.05
+        score += deposit_score * self.get_score(SCORES, 'price') / 4
 
         # bills includes - better score - 0.05
-        score += 5 if room['bills'] else 0
+        score += (self.get_score(SCORES, 'price') * 100) if room['bills'] else 0
 
         rooms_score = max(0, 100 - (int(room['rooms']) - 1)*15)
 
         if settings.DEBUG:
             print("ROOMS SCORE: {score}".format(score=rooms_score))
 
-        score += rooms_score*0.20
+        score += rooms_score * self.get_score(SCORES, 'rooms')
 
         # less housemates - better score
         if room['housemates'] != -1:
@@ -247,7 +244,7 @@ class SearchEngine(object):
             if settings.DEBUG:
                 print("HOUSEMATES SCORE: {score}".format(score=housemates_score))
 
-            score += housemates_score*0.20
+            score += housemates_score * self.get_score(SCORES, 'housemates')
 
         # more images - better score
         # no images -> -100
@@ -257,7 +254,7 @@ class SearchEngine(object):
         if settings.DEBUG:
             print("IMAGE SCORE: {score}".format(score=image_score))
 
-        score += image_score*0.05
+        score += image_score * self.get_score(SCORES, 'images')
 
         # if phone - better score
         #score += 100 if room['phone'] else 0
@@ -275,7 +272,7 @@ class SearchEngine(object):
         if settings.DEBUG:
             print("AVAILABLE SCORE: {score}".format(score=available_score))
 
-        score += image_score*0.15
+        score += available_score * self.get_score(SCORES, 'when')
 
         if settings.DEBUG:
             print("FINAL SCORE: {score}".format(score=score))
@@ -297,17 +294,7 @@ class SpareRoom(SearchEngine):
     details_endpoint = 'flatshare/flatshare_detail.pl?flatshare_id='
     file_name = 'spareroom.json'
 
-    preferences = {
-        'format': 'json',
-        'max_rent': settings.MAX_RENT_PM,
-        'per': 'pcm',
-        'page': 1,
-        'room_types': settings.TYPE,
-        'rooms_for': settings.FOR,
-        'max_per_page': settings.MAX_RESULTS,
-        'where': 'london',
-        'ensuit': 'Y',
-    }
+    preferences = {}
 
     def get_new_rooms(self):
         for area in self.AREAS:
@@ -325,13 +312,17 @@ class SpareRoom(SearchEngine):
 
         try:
             results = json.loads(self.make_get_request(url=url, cookies=self.cookies, headers=self.headers))
+            if settings.DEBUG:
+                print(results)
+
             if settings.VERBOSE:
                 print('Parsing page {page}/{total} flats in {area}'.format(page=results['page'], total=results['pages'], area=area))
 
             for room in results['results']:
                 room_id = room['advert_id']
 
-                if room_id in self.rooms and not settings.FORCE:
+                if room_id in self.rooms:
+                    self.rate_room(room_id)
                     continue
 
                 if settings.FAST:
@@ -342,7 +333,9 @@ class SpareRoom(SearchEngine):
                 self.rate_room(room_id)
         except Exception as e:
             if settings.VERBOSE:
+                print(traceback.format_exc())
                 print('Error parsing first page: {message}'.format(message=e.message))
+                exit(0)
             return None
 
         for page in range(1, min(int(results['pages']), settings.MAX_PAGES)):
@@ -361,7 +354,8 @@ class SpareRoom(SearchEngine):
             for room in results['results']:
                 room_id = room['advert_id']
 
-                if room_id in self.rooms and not settings.FORCE:
+                if room_id in self.rooms:
+                    self.rate_room(room_id)
                     continue
 
                 if settings.FAST:
@@ -498,103 +492,85 @@ def main():
     LOG_FORMAT = '%(asctime)s - %(engine)s - %(function)s - %(message)s'
     logging.basicConfig(format=LOG_FORMAT)
 
-    if not hasattr(settings, 'AREAS'):
-        print('Required settings property AREAS not found in the settings module')
-        exit(0)
 
-    # Create settings defaults if they don't exist
-    if not hasattr(settings, 'DEBUG'):
-        settings.DEBUG = False
+    """Score variables:
+    price + deposit - 0.10
+    bills inc - 0.05
+    area - 0.25
+    rooms - 0.20
+    housemates - 0.20
+    pictures - 0.05
+    available - 0.15
 
-    if not hasattr(settings, 'VERBOSE'):
-        settings.VERBOSE = False
+    all score from 0 to 100
+    """
 
-    if not hasattr(settings, 'FORCE'):
-        settings.FORCE = False
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', '--preferences', help='Preferences seperated by , (price,bills,areas,rooms,housemates,images,when)',                          default="a,r,h,w,p,b,i",    type=str)
+    parser.add_argument('-a', '--areas',       help='Prefered areas to search for',                                    required=True,                                         type=str, nargs='+')
+    parser.add_argument('-o', '--max-results', help='Number of rooms in the final report (default: 100)',              required=False,                      default=100,      type=int)
+    parser.add_argument('-m', '--max-rooms',   help='Number of rooms each page search (default: 100)',                 required=False,                      default=100,      type=int)
+    parser.add_argument('-p', '--max-pages',   help='Number of result pages to parse on every area (default: 10)',     required=False,                      default=10,       type=int)
+    parser.add_argument('-s', '--sleep',       help='Sleep between requests (default: 1)',                             required=False,                      default=1,        type=int)
+    parser.add_argument('-t', '--rent',        help='Maximum monthly rent (default: 700)',                             required=False,                      default=700,      type=int)
+    parser.add_argument('-w', '--date',        help='Ideal date to move into the room (Format: YYYY-MM-DD)',           required=True,                                         type=str)
+    parser.add_argument('-i', '--min-date',    help='Minimum date to move into the room (Format: YYYY-MM-DD)',         required=True,                                         type=str)
+    parser.add_argument('-g', '--gender',      help='Gender accepted rooms (default: males)',                          required=False,                      default='males',  choices=['males', 'females'])
+    parser.add_argument('-y', '--room-type',   help='Room types to search for (default: double)',                      required=False,                      default='double', choices=['single', 'double'])
+    parser.add_argument('-r', '--rate',        help='Re-rates the rooms in the database',                              required=False, action='store_true', default=False)
+    parser.add_argument('-u', '--update',      help='Updates room information when rating the room (use with --rate)', required=False, action='store_true', default=False)
+    parser.add_argument('-f', '--fast',        help='Gets only information from the list only (worst ratings)',        required=False, action='store_true', default=False)
+    parser.add_argument('-d', '--debug',       help='Prints debug messages',                                           required=False, action='store_true', default=False)
+    parser.add_argument('-v', '--verbose',     help='Prints verbose messages',                                         required=False, action='store_true', default=False)
 
-    if not hasattr(settings, 'MARK_OLD'):
-        settings.MARK_OLD = False
+    args = parser.parse_args()
 
-    if not hasattr(settings, 'FAST'):
-        settings.FAST = False
+    # boolean settings
+    settings.VERBOSE = args.verbose
+    settings.DEBUG   = args.debug
+    settings.FAST    = args.fast
+    settings.UPDATE  = args.update
 
-    if not hasattr(settings, 'SLEEP'):
-        settings.SLEEP = 1
+    settings.PREFERENCES = args.preferences.split(',')
+    settings.AREAS       = args.areas
 
-    max_range = -1
-    if '--max-rooms' in argv:
-        try:
-            max_range = int(argv[argv.index('--max-rooms') + 1])
-        except (ValueError, IndexError):
-            print('Error: no max rooms given...'); exit(0)
+    settings.MAX_RESULTS = args.max_results
+    settings.MAX_PAGES   = args.max_pages
+    settings.MAX_ROOMS   = args.max_rooms
+    settings.SLEEP       = args.sleep
 
-    settings.MAX_PAGES = 10;
-    if '--max-pages' in argv:
-        try:
-            settings.MAX_PAGES = int(argv[argv.index('--max-pages') + 1])
-        except (ValueError, IndexError):
-            print('Error: no max pages given...'); exit(0)
+    settings.MAX_RENT_PM        = args.rent
+    settings.WHEN               = datetime.strptime(args.date, "%Y-%m-%d")
+    settings.MIN_AVAILABLE_TIME = datetime.strptime(args.min_date, "%Y-%m-%d")
+    settings.FOR                = args.gender
+    settings.TYPE               = args.room_type
 
-    if '--sleep' in argv:
-        try:
-            settings.SLEEP = float(argv[argv.index('--sleep') + 1])
-        except (ValueError, IndexError):
-            print('Error: no sleep seconds given...'); exit(0)
+    # static vars
+    settings.FIELDS = ['score', 'id', 'images', 'prices', 'station', 'available', 'phone']
 
-    if '-v' in argv or '--verbose' in argv:
-        settings.VERBOSE = True
+    if args.update and not args.rate:
+        settings.UPDATE = False
 
-    if '-d' in argv or '--debug' in argv:
-        settings.DEBUG = True
+    spareroom_preferences = {
+        'format': 'json',
+        'max_rent': settings.MAX_RENT_PM,
+        'per': 'pcm',
+        'page': 1,
+        'room_types': settings.TYPE,
+        'rooms_for': settings.FOR,
+        'max_per_page': settings.MAX_ROOMS,
+        'where': 'london',
+        'when': settings.WHEN,
+    }
 
-    if '-f' in argv or '--force' in argv:
-        settings.FORCE = True
+    spareroom = SpareRoom(spareroom_preferences, settings.AREAS)
 
-    if '--fast' in argv:
-        settings.FAST = True
-
-    if len(argv) < 2 or '--help' in argv or '-h' in argv:
-        print('Usage: {command} --spareroom [ -v | -f ] [ --max-rooms rooms ] [ --max-pages pages ] [ --sleep sec ] [ --fast ]'.format(command=argv[0]))
-        print('    -v : verbose')
-        print('    -f : mark all rooms as not seen and re-rates them again')
-        print('    --max-rooms rooms : max rooms in final report')
-        print('    --max-pages pages : max to search in every area')
-        print('    --sleep sec : sec to sleep on every request (spareroom\'s sending 500 responses)')
-        print('    --fast : does not make a request for every room (worst scores in the algorithm)')
-        print('    --room room : fetchs the information of a room, re-rates it and displays it in the terminal')
-        exit(0)
-
-    if '--spareroom' in argv:
-        spareroom_preferences = {
-            'when': settings.WHEN,
-            'max_rent': settings.MAX_RENT_PM,
-            'rooms_for': settings.FOR,
-            'room_types': settings.TYPE,
-            'max_per_page': settings.MAX_RESULTS
-        }
-
-        if not hasattr(settings, 'SPAREROOM_COOKIES'):
-            print('Required settings property SPAREROOM_COOKIES not found in the settings module')
-            exit(0)
-
-        spareroom = SpareRoom(spareroom_preferences, settings.AREAS, settings.SPAREROOM_COOKIES, ['TYPE', 'FOR', 'MAX_RENT_PM', 'MAX_RESULTS', 'MARK_OLD', 'SPAREROOM_PREF_IDS', 'FIELDS'])
-
-    if '--rate' in argv:
-        if '--spareroom' in argv:
-            spareroom.rate()
-
-    elif '--room' in argv:
-        room_id = argv[argv.index('--room') + 1]
-        if '--spareroom' in argv:
-            pprint(spareroom.get_room_info(room_id, room_id))
-            spareroom.rate_room(room_id)
-            exit(0)
+    if args.rate:
+        spareroom.rate()
     else:
-        if '--spareroom' in argv:
-            spareroom.get_new_rooms()
+        spareroom.get_new_rooms()
 
-    if '--spareroom' in argv:
-        spareroom.generate_report(fields=settings.FIELDS, pref_ids=settings.SPAREROOM_PREF_IDS, max_range=max_range)
+    spareroom.generate_report(fields=settings.FIELDS, max_range=settings.MAX_RESULTS)
 
 if __name__ == "__main__":
     main()
